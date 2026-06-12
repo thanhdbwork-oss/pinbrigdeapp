@@ -1,0 +1,132 @@
+<!-- ... existing code ... -->
+            const [isComposerOpen, setIsComposerOpen] = React.useState(false);
+            const [composerDrafts, setComposerDrafts] = React.useState({});
+            const [toast, setToast] = React.useState({ show: false, status: 'processing', message: '' });
+
+            // LẮNG NGHE DỮ LIỆU TỪ EXTENSION & AUTO RUN AI
+            React.useEffect(() => {
+                fetchPins();
+                
+                const params = new URLSearchParams(window.location.search);
+                if (params.get('action') === 'ext_extract') {
+                    const extTitle = params.get('title') || 'Sản phẩm từ Extension';
+                    const extUrl = params.get('url') || '';
+                    const imagesStr = params.get('images') || '';
+                    const extractedUrls = imagesStr.split(',').filter(Boolean);
+                    
+                    if (extractedUrls.length > 0) {
+                        const drafts = {};
+                        extractedUrls.forEach((img, idx) => {
+                            drafts[idx] = {
+                                id: idx,
+                                imageUrl: img,
+                                selected: true,
+                                title: extTitle,
+                                description: '⏳ AI đang phân tích và viết nội dung...', // Hiển thị trạng thái chờ
+                                destinationUrl: extUrl
+                            };
+                        });
+                        
+                        setLinkInput(extUrl);
+                        setComposerDrafts(drafts);
+                        setIsComposerOpen(true);
+                        
+                        // Xóa param trên link để tránh bị lặp lại khi F5
+                        window.history.replaceState({}, document.title, window.location.pathname);
+                        
+                        // === KÍCH HOẠT AI TỰ ĐỘNG NGAY KHI CÀO XONG ===
+                        const savedKey = localStorage.getItem('geminiKey') || "";
+                        if (savedKey.trim() !== "") {
+                            runAIForDrafts(extTitle, drafts, savedKey.trim());
+                        } else {
+                            showToast('error', 'Hãy nhập Gemini API Key trong Cài đặt để AI tự động viết bài!');
+                            setTimeout(() => setIsSettingsModalOpen(true), 2000);
+                        }
+                    }
+                }
+            }, []);
+
+            const fetchPins = async () => {
+<!-- ... existing code ... -->
+            const updateDraft = (idx, field, value) => {
+                setComposerDrafts(prev => ({
+                    ...prev,
+                    [idx]: { ...prev[idx], [field]: value }
+                }));
+            };
+
+            // =========================================
+            // HÀM GỌI AI DÙNG CHUNG (TỰ ĐỘNG & THỦ CÔNG)
+            // =========================================
+            const runAIForDrafts = async (baseTitle, targetDrafts, key) => {
+                showToast('processing', 'AI đang tự động viết tiêu đề & mô tả...', 0);
+                
+                try {
+                    const prompt = `Bạn là chuyên gia Pinterest Marketing. Viết 5 tiêu đề (dưới 100 ký tự) và 5 mô tả lôi cuốn (dưới 500 ký tự, có hashtag và call-to-action) bằng tiếng Anh cho sản phẩm này: "${baseTitle}". Trả về ĐÚNG định dạng JSON sau, không được kèm markdown: { "results": [ { "title": "...", "description": "..." } ] }`;
+
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: prompt }] }],
+                            generationConfig: { responseMimeType: "application/json" }
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errData = await response.json();
+                        throw new Error(errData.error?.message || 'Lỗi từ máy chủ Google API');
+                    }
+                    
+                    const data = await response.json();
+                    let rawText = data.candidates[0].content.parts[0].text;
+                    
+                    // Lọc bỏ markdown định dạng code
+                    rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+                    
+                    const parsedData = JSON.parse(rawText);
+                    const aiResults = parsedData.results;
+                    
+                    if (!aiResults || aiResults.length === 0) {
+                        throw new Error("Dữ liệu AI trả về bị rỗng.");
+                    }
+
+                    // Đổ dữ liệu vào Form tự động
+                    setComposerDrafts(prev => {
+                        // Đảm bảo không bị lỗi bất đồng bộ khi React chưa kịp render
+                        const current = Object.keys(prev).length > 0 ? prev : targetDrafts;
+                        const next = { ...current };
+                        let aiIndex = 0;
+                        Object.keys(next).forEach((k) => {
+                            if (next[k].selected) {
+                                const aiData = aiResults[aiIndex % aiResults.length];
+                                next[k].title = aiData.title || next[k].title;
+                                next[k].description = aiData.description || "";
+                                aiIndex++;
+                            }
+                        });
+                        return next;
+                    });
+                    
+                    showToast('success', 'AI đã viết xong nội dung!');
+                } catch (error) {
+                    console.error("AI Error:", error);
+                    showToast('error', `Lỗi AI: ${error.message}`, 7000);
+                }
+            };
+
+            // Nút bấm thủ công (Phòng trường hợp bạn muốn bắt AI viết lại từ đầu)
+            const autoGenerateContent = () => {
+                const cleanKey = geminiKey.trim(); 
+                if (!cleanKey) {
+                    showToast('error', 'Vui lòng nhập Gemini API Key!');
+                    setIsSettingsModalOpen(true);
+                    return;
+                }
+                const draftsArray = Object.values(composerDrafts);
+                const baseTitle = draftsArray[0]?.title || 'Sản phẩm Etsy';
+                runAIForDrafts(baseTitle, composerDrafts, cleanKey);
+            };
+
+            const filteredPins = pins.filter(pin => 
+<!-- ... existing code ... -->
