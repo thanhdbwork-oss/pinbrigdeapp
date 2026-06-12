@@ -1,9 +1,61 @@
-<!-- ... existing code ... -->
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PinBridge - AI Pinterest Marketing</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        @keyframes modalFadeIn { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
+        .modal-animate { animation: modalFadeIn 0.2s ease-out forwards; }
+        @keyframes slideUp { from { bottom: -100px; opacity: 0; } to { bottom: 24px; opacity: 1; } }
+        .toast-animate { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // ==========================================
+        // 🔑 SUPABASE CONFIGURATION (Dữ liệu thật)
+        // ==========================================
+        const SUPABASE_URL = 'https://kakffoghnrcxxvdqwiyn.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_yFTB4wh16jiMAyAhS9Qmkg_Ca9Jbg1_';
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        const MOCK_BOARDS = [
+            { id: 'b1', name: 'Gift Ideas 2024' },
+            { id: 'b2', name: 'Home Decor Inspo' },
+            { id: 'b3', name: 'Jewelry & Accessories' },
+        ];
+
+        function App() {
+            const [pins, setPins] = React.useState([]);
+            const [isLoading, setIsLoading] = React.useState(true);
+            const [searchKeyword, setSearchKeyword] = React.useState("");
+            const [isProfileMenuOpen, setIsProfileMenuOpen] = React.useState(false);
+            const [isSettingsModalOpen, setIsSettingsModalOpen] = React.useState(false);
+            
+            const [geminiKey, setGeminiKey] = React.useState(localStorage.getItem('geminiKey') || "");
+            
             const [isComposerOpen, setIsComposerOpen] = React.useState(false);
             const [composerDrafts, setComposerDrafts] = React.useState({});
             const [toast, setToast] = React.useState({ show: false, status: 'processing', message: '' });
 
-            // LẮNG NGHE DỮ LIỆU TỪ EXTENSION & AUTO RUN AI
             React.useEffect(() => {
                 fetchPins();
                 
@@ -22,24 +74,25 @@
                                 imageUrl: img,
                                 selected: true,
                                 title: extTitle,
-                                description: '⏳ AI đang phân tích và viết nội dung...', // Hiển thị trạng thái chờ
-                                destinationUrl: extUrl
+                                description: '⏳ AI đang phân tích...', // Báo hiệu cho người dùng
+                                destinationUrl: extUrl,
+                                boardId: ''
                             };
                         });
                         
-                        setLinkInput(extUrl);
                         setComposerDrafts(drafts);
                         setIsComposerOpen(true);
                         
-                        // Xóa param trên link để tránh bị lặp lại khi F5
+                        // Xóa link rác để không bị lặp lại khi F5
                         window.history.replaceState({}, document.title, window.location.pathname);
                         
-                        // === KÍCH HOẠT AI TỰ ĐỘNG NGAY KHI CÀO XONG ===
+                        // Kích hoạt AI tự động nếu đã có Key
                         const savedKey = localStorage.getItem('geminiKey') || "";
                         if (savedKey.trim() !== "") {
+                            // Gọi hàm AI với dữ liệu vừa parse
                             runAIForDrafts(extTitle, drafts, savedKey.trim());
                         } else {
-                            showToast('error', 'Hãy nhập Gemini API Key trong Cài đặt để AI tự động viết bài!');
+                            showToast('error', 'Hãy nhập Gemini API Key trong phần Profile để AI tự động viết!');
                             setTimeout(() => setIsSettingsModalOpen(true), 2000);
                         }
                     }
@@ -47,19 +100,50 @@
             }, []);
 
             const fetchPins = async () => {
-<!-- ... existing code ... -->
-            const updateDraft = (idx, field, value) => {
-                setComposerDrafts(prev => ({
-                    ...prev,
-                    [idx]: { ...prev[idx], [field]: value }
-                }));
+                setIsLoading(true);
+                try {
+                    const { data, error } = await supabase
+                        .from('pinterest_pins')
+                        .select('*')
+                        .order('posted_at', { ascending: false });
+                    if (!error) setPins(data || []);
+                } catch (error) {
+                    console.error("Lỗi khi tải dữ liệu:", error);
+                }
+                setIsLoading(false);
             };
 
-            // =========================================
-            // HÀM GỌI AI DÙNG CHUNG (TỰ ĐỘNG & THỦ CÔNG)
-            // =========================================
+            const showToast = (status, message, duration = 3000) => {
+                setToast({ show: true, status, message });
+                if (duration) {
+                    setTimeout(() => setToast({ show: false, status: '', message: '' }), duration);
+                }
+            };
+
+            const copyToClipboard = (text, type) => {
+                const textArea = document.createElement("textarea");
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    showToast('success', `Đã copy ${type}!`);
+                } catch (err) {
+                    showToast('error', 'Không thể copy, vui lòng thử lại.');
+                }
+                document.body.removeChild(textArea);
+            };
+
+            const saveGeminiKey = () => {
+                const cleanKey = geminiKey.trim();
+                setGeminiKey(cleanKey);
+                localStorage.setItem('geminiKey', cleanKey);
+                showToast('success', 'Đã lưu Gemini API Key!');
+                setIsSettingsModalOpen(false);
+            };
+
             const runAIForDrafts = async (baseTitle, targetDrafts, key) => {
-                showToast('processing', 'AI đang tự động viết tiêu đề & mô tả...', 0);
+                showToast('processing', 'AI đang tự động phân tích và viết nội dung...', 0);
                 
                 try {
                     const prompt = `Bạn là chuyên gia Pinterest Marketing. Viết 5 tiêu đề (dưới 100 ký tự) và 5 mô tả lôi cuốn (dưới 500 ký tự, có hashtag và call-to-action) bằng tiếng Anh cho sản phẩm này: "${baseTitle}". Trả về ĐÚNG định dạng JSON sau, không được kèm markdown: { "results": [ { "title": "...", "description": "..." } ] }`;
@@ -80,20 +164,15 @@
                     
                     const data = await response.json();
                     let rawText = data.candidates[0].content.parts[0].text;
-                    
-                    // Lọc bỏ markdown định dạng code
                     rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
                     
                     const parsedData = JSON.parse(rawText);
                     const aiResults = parsedData.results;
                     
-                    if (!aiResults || aiResults.length === 0) {
-                        throw new Error("Dữ liệu AI trả về bị rỗng.");
-                    }
+                    if (!aiResults || aiResults.length === 0) throw new Error("Dữ liệu AI bị rỗng.");
 
-                    // Đổ dữ liệu vào Form tự động
+                    // Cập nhật State
                     setComposerDrafts(prev => {
-                        // Đảm bảo không bị lỗi bất đồng bộ khi React chưa kịp render
                         const current = Object.keys(prev).length > 0 ? prev : targetDrafts;
                         const next = { ...current };
                         let aiIndex = 0;
@@ -108,18 +187,18 @@
                         return next;
                     });
                     
-                    showToast('success', 'AI đã viết xong nội dung!');
+                    showToast('success', 'AI đã hoàn thành!');
                 } catch (error) {
                     console.error("AI Error:", error);
                     showToast('error', `Lỗi AI: ${error.message}`, 7000);
                 }
             };
 
-            // Nút bấm thủ công (Phòng trường hợp bạn muốn bắt AI viết lại từ đầu)
-            const autoGenerateContent = () => {
+            // Nút bấm AI thủ công
+            const manualGenerateAI = () => {
                 const cleanKey = geminiKey.trim(); 
                 if (!cleanKey) {
-                    showToast('error', 'Vui lòng nhập Gemini API Key!');
+                    showToast('error', 'Vui lòng nhập API Key!');
                     setIsSettingsModalOpen(true);
                     return;
                 }
@@ -128,5 +207,256 @@
                 runAIForDrafts(baseTitle, composerDrafts, cleanKey);
             };
 
+            const handleSaveToDB = async () => {
+                const selectedDrafts = Object.values(composerDrafts).filter(d => d.selected);
+                if (selectedDrafts.length === 0) return;
+
+                setIsComposerOpen(false); 
+                showToast('processing', `Đang lưu ${selectedDrafts.length} bài vào Database...`, 0);
+
+                const pinsToInsert = selectedDrafts.map(draft => {
+                    const boardName = MOCK_BOARDS.find(b => b.id === draft.boardId)?.name || 'Uncategorized';
+                    return {
+                        title: draft.title,
+                        description: draft.description,
+                        image_url: draft.imageUrl,
+                        destination_url: draft.destinationUrl,
+                        board_id: draft.boardId || null,
+                        board_name: boardName,
+                        status: 'manual_draft'
+                    };
+                });
+
+                try {
+                    const { error } = await supabase.from('pinterest_pins').insert(pinsToInsert);
+                    if (error) throw error;
+                    showToast('success', `Đã lưu thành công ${selectedDrafts.length} bài!`);
+                    fetchPins();
+                } catch (error) {
+                    showToast('error', `Lưu thất bại: ${error.message}`);
+                }
+            };
+
+            const updateDraft = (idx, field, value) => {
+                setComposerDrafts(prev => ({
+                    ...prev,
+                    [idx]: { ...prev[idx], [field]: value }
+                }));
+            };
+
+            const applyBoardToAll = (sourceIdx) => {
+                const targetBoardId = composerDrafts[sourceIdx].boardId;
+                if (!targetBoardId) return;
+                setComposerDrafts(prev => {
+                    const next = { ...prev };
+                    Object.keys(next).forEach(key => {
+                        if (next[key].selected) next[key].boardId = targetBoardId;
+                    });
+                    return next;
+                });
+            };
+
             const filteredPins = pins.filter(pin => 
-<!-- ... existing code ... -->
+                pin.title?.toLowerCase().includes(searchKeyword.toLowerCase())
+            );
+
+            return (
+                <div className="flex flex-col h-screen overflow-hidden text-slate-800">
+                    {/* Header */}
+                    <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0 z-10">
+                        <div className="flex items-center gap-2 text-xl font-bold text-slate-900">
+                            <i className="fa-brands fa-pinterest text-red-600 text-2xl"></i>
+                            PinBridge <span className="text-xs font-normal text-slate-500 bg-slate-100 px-2 py-1 rounded">V2.0</span>
+                        </div>
+                        <div className="relative">
+                            <button onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)} className="flex items-center gap-3 hover:bg-slate-50 p-2 rounded-lg">
+                                <div className="text-right hidden md:block">
+                                    <div className="text-sm font-semibold">Thomas Duong</div>
+                                    <div className="text-xs text-slate-500">Shop Owner</div>
+                                </div>
+                                <div className="w-9 h-9 rounded-full bg-slate-800 text-white flex items-center justify-center font-bold">T</div>
+                            </button>
+                            
+                            {isProfileMenuOpen && (
+                                <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-slate-100 py-1 z-50">
+                                    <button onClick={() => { setIsSettingsModalOpen(true); setIsProfileMenuOpen(false); }} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2">
+                                        <i className="fa-solid fa-key w-4 text-center"></i> Cài đặt AI & API
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    </header>
+
+                    {/* Main Content */}
+                    <main className="flex-1 overflow-y-auto p-6 md:p-8 bg-slate-50 custom-scrollbar">
+                        <div className="max-w-7xl mx-auto space-y-8">
+                            
+                            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm text-center py-4">
+                                <h2 className="text-lg font-bold text-slate-800 mb-2">Đã sẵn sàng nhận dữ liệu!</h2>
+                                <p className="text-slate-500 text-sm">Hãy mở trang sản phẩm Etsy và bấm nút <b>"⚡ Pin to PinBridge"</b> từ Extension.</p>
+                            </div>
+
+                            {/* Analytics/History Table */}
+                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+                                <div className="p-5 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-4 bg-white">
+                                    <h2 className="text-lg font-bold text-slate-800">Lịch sử Pin đã lưu</h2>
+                                    <div className="relative w-full sm:w-72">
+                                        <i className="fa-solid fa-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                                        <input 
+                                            type="text" placeholder="Tìm kiếm tiêu đề..." value={searchKeyword} onChange={(e) => setSearchKeyword(e.target.value)}
+                                            className="w-full pl-9 pr-4 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-red-500 outline-none"
+                                        />
+                                    </div>
+                                </div>
+                                
+                                <div className="overflow-x-auto flex-1">
+                                    <table className="w-full text-left text-sm text-slate-600 min-w-[800px]">
+                                        <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-semibold border-b border-slate-200">
+                                            <tr>
+                                                <th className="px-6 py-4">Sản phẩm</th>
+                                                <th className="px-6 py-4">Bảng (Board)</th>
+                                                <th className="px-6 py-4">Mô tả</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {isLoading ? (
+                                                <tr><td colSpan="3" className="text-center py-12"><i className="fa-solid fa-circle-notch fa-spin text-red-500 text-3xl"></i></td></tr>
+                                            ) : filteredPins.length === 0 ? (
+                                                <tr><td colSpan="3" className="text-center py-16 text-slate-500">Chưa có dữ liệu.</td></tr>
+                                            ) : filteredPins.map((pin) => (
+                                                <tr key={pin.id} className="hover:bg-slate-50/80 transition-colors">
+                                                    <td className="px-6 py-4 w-1/3">
+                                                        <div className="flex items-center gap-3">
+                                                            <img src={pin.image_url} className="w-16 h-16 rounded-lg object-cover border shadow-sm bg-white" />
+                                                            <div className="flex flex-col gap-1">
+                                                                <span className="font-bold text-slate-800 line-clamp-2">{pin.title}</span>
+                                                                <button onClick={() => copyToClipboard(pin.title, 'Tiêu đề')} className="text-left text-xs text-blue-600 hover:text-blue-800">Copy Tiêu đề</button>
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <span className="bg-slate-100 px-2 py-1 rounded text-xs font-medium">{pin.board_name || 'N/A'}</span>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <div className="flex flex-col gap-1">
+                                                            <p className="line-clamp-2 text-xs text-slate-500">{pin.description}</p>
+                                                            <button onClick={() => copyToClipboard(pin.description, 'Mô tả')} className="text-left text-xs text-blue-600 hover:text-blue-800">Copy Mô tả</button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+
+                    {}
+                    {isComposerOpen && (
+                        <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+                            <div className="bg-[#fdfbf7] w-[98vw] max-w-[1500px] h-[92vh] rounded-2xl shadow-2xl flex flex-col modal-animate overflow-hidden border border-slate-200">
+                                <div className="px-6 py-4 border-b border-slate-200 bg-white flex justify-between items-center shrink-0">
+                                    <div>
+                                        <h2 className="text-xl font-bold text-slate-800">Workspace (Dữ liệu từ Etsy)</h2>
+                                        <p className="text-sm text-slate-500">AI đang tự động xử lý nội dung. Bạn có thể copy để đăng sang Pinterest.</p>
+                                    </div>
+                                    <button onClick={manualGenerateAI} className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold text-sm rounded-xl hover:opacity-90 flex items-center gap-2">
+                                        <i className="fa-solid fa-rotate-right"></i> Yêu cầu AI viết lại
+                                    </button>
+                                </div>
+
+                                <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-slate-50/50">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                                        {Object.values(composerDrafts).map((draft, idx) => (
+                                            <div key={idx} className={`bg-white rounded-xl overflow-hidden border-2 transition-all flex flex-col shadow-sm ${draft.selected ? 'border-red-500 shadow-md ring-4 ring-red-500/10' : 'border-slate-200'}`}>
+                                                <div className="relative h-60 bg-white group flex items-center justify-center border-b">
+                                                    <img src={draft.imageUrl} className={`max-w-full max-h-full object-contain transition-all ${!draft.selected && 'grayscale opacity-50'}`} />
+                                                    <div className="absolute top-3 left-3 flex items-center gap-2 bg-white/95 backdrop-blur-sm px-3 py-1.5 rounded-full shadow-md cursor-pointer hover:scale-105" onClick={() => updateDraft(idx, 'selected', !draft.selected)}>
+                                                        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${draft.selected ? 'bg-red-500 border-red-500' : 'border-slate-300 bg-white'}`}>
+                                                            {draft.selected && <i className="fa-solid fa-check text-white text-xs"></i>}
+                                                        </div>
+                                                    </div>
+                                                    <button onClick={() => copyToClipboard(draft.imageUrl, 'Link Hình Ảnh')} className="absolute top-3 right-3 bg-white/90 w-8 h-8 rounded-full shadow flex items-center justify-center text-slate-700 hover:bg-slate-800 hover:text-white" title="Copy Link Hình Ảnh">
+                                                        <i className="fa-solid fa-link text-sm"></i>
+                                                    </button>
+                                                </div>
+                                                <div className={`p-5 flex flex-col gap-4 flex-1 transition-all ${!draft.selected && 'opacity-40 pointer-events-none'}`}>
+                                                    <div className="relative">
+                                                        <input type="text" placeholder="Tiêu đề Pin..." value={draft.title} onChange={(e) => updateDraft(idx, 'title', e.target.value)} className="w-full border-b-2 border-slate-200 py-1 pr-8 font-bold text-slate-800 focus:outline-none focus:border-red-500 bg-transparent text-sm"/>
+                                                        <button onClick={() => copyToClipboard(draft.title, 'Tiêu đề')} className="absolute right-0 top-1 text-slate-400 hover:text-red-600"><i className="fa-regular fa-copy"></i></button>
+                                                    </div>
+                                                    <div className="relative flex-1 flex flex-col">
+                                                        <textarea rows="4" placeholder="Mô tả sản phẩm..." value={draft.description} onChange={(e) => updateDraft(idx, 'description', e.target.value)} className="w-full border border-slate-200 rounded-lg p-3 pr-10 text-xs text-slate-600 focus:outline-none focus:ring-2 focus:ring-red-500/50 resize-none custom-scrollbar flex-1"/>
+                                                        <button onClick={() => copyToClipboard(draft.description, 'Mô tả')} className="absolute right-3 top-3 text-slate-400 hover:text-red-600"><i className="fa-regular fa-copy"></i></button>
+                                                    </div>
+                                                    {/* Board Selector */}
+                                                    <div className="pt-2 border-t border-slate-100 flex flex-col gap-2">
+                                                        <select value={draft.boardId} onChange={(e) => updateDraft(idx, 'boardId', e.target.value)} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-red-500 bg-slate-50">
+                                                            <option value="">-- Chọn Board để lưu --</option>
+                                                            {MOCK_BOARDS.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                                                        </select>
+                                                        {draft.boardId && (
+                                                            <button onClick={() => applyBoardToAll(idx)} className="text-[10px] text-blue-600 hover:underline text-left">
+                                                                <i className="fa-solid fa-copy"></i> Áp dụng Board này cho tất cả
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="px-6 py-4 bg-white border-t border-slate-200 flex justify-end items-center gap-3 shrink-0">
+                                    <button onClick={() => setIsComposerOpen(false)} className="px-6 py-2.5 text-slate-600 font-bold hover:bg-slate-100 rounded-lg">Đóng</button>
+                                    <button onClick={handleSaveToDB} className="px-8 py-2.5 bg-slate-800 text-white font-bold text-lg rounded-lg hover:bg-slate-900 shadow-md disabled:opacity-50 flex items-center gap-2" disabled={Object.values(composerDrafts).filter(d => d.selected).length === 0}>
+                                        <i className="fa-solid fa-database"></i> Lưu dữ liệu xuống DB
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {}
+                    {/* MODAL SETTINGS AI */}
+                    {isSettingsModalOpen && (
+                        <div className="fixed inset-0 z-[200] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+                            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden modal-animate border border-slate-200">
+                                <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                                    <h3 className="font-bold text-lg text-slate-800">Cấu hình API & AI</h3>
+                                    <button onClick={() => setIsSettingsModalOpen(false)} className="text-slate-400 hover:text-slate-600 w-8 h-8 rounded-full hover:bg-slate-200"><i className="fa-solid fa-xmark"></i></button>
+                                </div>
+                                <div className="p-6">
+                                    <div className="p-5 rounded-xl border border-purple-200 bg-purple-50 flex flex-col gap-4">
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-bold text-slate-600 uppercase">Gemini API Key</label>
+                                            <input type="password" value={geminiKey} onChange={(e) => setGeminiKey(e.target.value)} placeholder="Nhập API Key..." className="w-full text-sm p-3 border border-slate-300 rounded-lg focus:outline-none focus:border-purple-500 font-mono" />
+                                        </div>
+                                        <button onClick={saveGeminiKey} className="w-full py-2.5 bg-purple-700 text-white rounded-lg font-bold text-sm hover:bg-purple-800">Lưu Key</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* TOAST */}
+                    {toast.show && (
+                        <div className="fixed bottom-6 right-6 z-[300] toast-animate">
+                            <div className={`rounded-xl shadow-2xl p-4 flex items-center gap-4 border-2 w-80 ${toast.status === 'processing' ? 'bg-slate-800 border-slate-700 text-white' : toast.status === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                                <div className="flex-1 min-w-0">
+                                    <div className="font-bold text-sm">{toast.status === 'processing' ? 'Đang xử lý...' : toast.status === 'success' ? 'Thành công!' : 'Lỗi'}</div>
+                                    <div className="text-xs mt-1 truncate">{toast.message}</div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
